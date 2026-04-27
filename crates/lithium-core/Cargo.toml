@@ -1,0 +1,24 @@
+[package]
+name = "lithium-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "lithium core: types, SQLite storage, config loader, projection logic"
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+rusqlite.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+directories.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
