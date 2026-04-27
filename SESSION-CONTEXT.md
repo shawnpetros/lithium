@@ -2,26 +2,25 @@
 
 ## Status
 
-Project just scaffolded 2026-04-27. No code written yet. Spec for Phase 1 is complete at `docs/SPEC-PHASE-1.md`. README candidate is at `README.md`. Hero image prompt is at `docs/HERO-IMAGE-PROMPT.md` ready to paste into ChatGPT image gen.
+Repo live at https://github.com/shawnpetros/lithium (public, MIT). Initial scaffold pushed 2026-04-27: README + hero image + Phase 1 spec + project frame. No Rust code yet. Phase 1 build is the next session.
 
 ## In-Flight
 
-None. Awaiting the user to:
-1. Generate the hero image via ChatGPT image gen using the prompt
-2. Place the result at `assets/hero.png`
-3. Decide whether to dispatch P1 build to [[Whetstone]] or do it interactively
+Nothing currently active. Awaiting decision: dispatch P1 to [[Whetstone]] for an autonomous build OR run the build interactively.
 
 ## Key Details
 
-- Repo not yet on GitHub. Private local only.
-- No `Cargo.toml` yet. Phase 1 build session will run `cargo new` to scaffold the workspace.
-- Anthropic Admin API key required for Phase 1 (separate from regular API key, generated at console.anthropic.com under Settings -> Admin Keys). Goes in `~/.config/lithium/config.toml`.
-- Claude Code session-limit reading uses NoobyGains/claude-pulse pattern: parse `~/.claude/` state files. Reverse-engineer via their Python source if unclear.
+- Repo: https://github.com/shawnpetros/lithium
+- Topics set: llmops, cost-tracking, claude, anthropic, openai, openrouter, rust, cli, developer-tools, ai-agents, observability
+- Anthropic Admin API key required for P1 build (separate from regular API key, generated at console.anthropic.com -> Settings -> Admin Keys). Goes in `~/.config/lithium/config.toml` per the spec.
+- Claude Code session reader uses NoobyGains/claude-pulse pattern. Their Python source is the reference; do NOT vendor it, just understand the file format.
+- Hero alts at `assets/hero-alts/` are gitignored (local-only reference).
 
 ## Next Steps
 
-1. Generate hero image (user action, ChatGPT)
-2. Initial commit + push to `github.com/shawnpetros/lithium` (public)
-3. Phase 1 build session: `cargo new --bin lithium`, implement the spec at `docs/SPEC-PHASE-1.md`. Either Whetstone-dispatch or interactive.
-4. Cut v0.1.0 once `lithium today` and `lithium month` are working with real Anthropic data.
-5. Loop in `cship` segment + SwiftBar plugin for Phase 3 (after OpenAI + OpenRouter adapters land in Phase 2).
+1. Decide Whetstone-dispatch vs interactive for the P1 build session.
+2. Phase 1 build: `cargo new --bin lithium-cli`, then implement the spec at `docs/SPEC-PHASE-1.md`. All 11 P1 features in `features.json` with their scenarios.
+3. Verify exact Anthropic Admin API endpoint shape from docs.anthropic.com at build time (one of the four open questions in the spec).
+4. Reverse-engineer Claude Code state file format by reading `~/.claude/` plus NoobyGains/claude-pulse Python source.
+5. Record demo gif with `vhs` once `lithium today` and `lithium month` are working.
+6. Cut v0.1.0 with GitHub release notes once Phase 1 acceptance criteria pass.
