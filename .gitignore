@@ -1,0 +1,31 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local state - NEVER commit these
+.env
+.env.local
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Lithium-specific runtime state (should never be in repo)
+**/usage.db
+**/.config/lithium/
+
+# Backup hero alts (don't ship to public repo)
+assets/hero-alts/
+
+# vhs intermediate files
+assets/*.cast
