@@ -20,17 +20,25 @@ pub async fn run() -> Result<()> {
         println!("Editing {}", path.display());
     }
 
-    let editor = std::env::var("EDITOR")
+    let editor_raw = std::env::var("EDITOR")
         .or_else(|_| std::env::var("VISUAL"))
         .unwrap_or_else(|_| "vim".to_string());
 
-    let status = Command::new(&editor)
+    // $EDITOR may include args (e.g., "nvim -f", "code -w"). Split into binary + args.
+    let mut parts = editor_raw.split_whitespace();
+    let bin = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("$EDITOR is empty"))?;
+    let extra_args: Vec<&str> = parts.collect();
+
+    let status = Command::new(bin)
+        .args(&extra_args)
         .arg(&path)
         .status()
-        .with_context(|| format!("launch editor `{editor}`"))?;
+        .with_context(|| format!("launch editor `{editor_raw}`"))?;
 
     if !status.success() {
-        anyhow::bail!("editor `{editor}` exited with {status}");
+        anyhow::bail!("editor `{editor_raw}` exited with {status}");
     }
     Ok(())
 }

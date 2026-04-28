@@ -6,6 +6,32 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// Resolve the config root: `$XDG_CONFIG_HOME` if set, else `~/.config`.
+///
+/// We deliberately use XDG-style paths on all platforms, including macOS,
+/// because that matches what other CLI tools do (gh, starship, helix, zellij)
+/// and what users expect to type. The `directories::BaseDirs::config_dir()`
+/// helper returns `~/Library/Application Support` on macOS, which is correct
+/// per Apple's HIG but the wrong shape for a CLI tool.
+fn xdg_config_home() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("XDG_CONFIG_HOME") {
+        if !p.is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    BaseDirs::new().map(|b| b.home_dir().join(".config"))
+}
+
+/// Resolve the data root: `$XDG_DATA_HOME` if set, else `~/.local/share`.
+fn xdg_data_home() -> Option<PathBuf> {
+    if let Ok(p) = std::env::var("XDG_DATA_HOME") {
+        if !p.is_empty() {
+            return Some(PathBuf::from(p));
+        }
+    }
+    BaseDirs::new().map(|b| b.home_dir().join(".local").join("share"))
+}
+
 /// Top-level config shape mapped to `~/.config/lithium/config.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -72,11 +98,11 @@ pub struct FixedCostsConfig {
 
 impl Config {
     /// Path to config file: `${XDG_CONFIG_HOME}/lithium/config.toml`,
-    /// falling back to `~/.config/lithium/config.toml` on macOS/Linux.
+    /// falling back to `~/.config/lithium/config.toml` on macOS and Linux.
     pub fn path() -> Result<PathBuf> {
-        let base = BaseDirs::new()
+        let base = xdg_config_home()
             .ok_or_else(|| Error::Config("cannot resolve home directory".into()))?;
-        Ok(base.config_dir().join("lithium").join("config.toml"))
+        Ok(base.join("lithium").join("config.toml"))
     }
 
     /// Resolve the configured DB path, applying defaults and tilde expansion.
@@ -132,13 +158,8 @@ impl Config {
 }
 
 fn default_db_path_string() -> String {
-    let base = BaseDirs::new();
-    if let Some(b) = base {
-        b.data_local_dir()
-            .join("lithium")
-            .join("usage.db")
-            .display()
-            .to_string()
+    if let Some(base) = xdg_data_home() {
+        base.join("lithium").join("usage.db").display().to_string()
     } else {
         "~/.local/share/lithium/usage.db".to_string()
     }
