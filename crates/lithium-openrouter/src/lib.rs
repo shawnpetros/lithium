@@ -13,7 +13,7 @@ use chrono::{Datelike, NaiveDate, TimeZone, Utc};
 use lithium_core::types::{Provider, Source, UsageRow};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 const KEY_ENDPOINT_PATH: &str = "/api/v1/key";
 
@@ -41,11 +41,19 @@ impl OpenRouterClient {
         })
     }
 
-    /// Fetch the /api/v1/key response and return up to two UsageRows:
-    /// one for today's spend (period = today UTC) and one for month-to-date
-    /// (period = month-start UTC -> today end UTC), both with the same data
-    /// for cross-checking. The CLI only sums daily rows in `lithium today`,
-    /// and the month-to-date row is informational for `lithium adapters`.
+    /// Fetch the /api/v1/key response and return up to two UsageRows with
+    /// **disjoint** periods so they sum cleanly to month-to-date without
+    /// double-counting:
+    ///
+    /// 1. Today row (period = today midnight -> tomorrow midnight UTC),
+    ///    cost = `usage_daily`. Powers `lithium today`.
+    /// 2. Earlier-this-month row (period = month start -> today midnight UTC),
+    ///    cost = `usage_monthly - usage_daily`. Powers `lithium month` minus
+    ///    today.
+    ///
+    /// Both UPSERT on the same period each poll, so re-polling refreshes
+    /// the snapshot without creating duplicates. If today is day 1 of the
+    /// month, the second row is omitted (zero-length period).
     pub async fn fetch_usage(&self) -> Result<Vec<UsageRow>> {
         let url = format!("{}{}", self.base_url, KEY_ENDPOINT_PATH);
         debug!(url = %url, "GET openrouter key");
@@ -96,8 +104,8 @@ impl OpenRouterClient {
         let today = now.date_naive();
         let raw = serde_json::to_value(&parsed).unwrap_or(serde_json::Value::Null);
 
-        // Use a short stable model label so the today/month per-row column
-        // doesn't wrap. Key label moves into raw_payload for forensics.
+        // Use short stable model labels so today/month columns don't wrap.
+        // Key label moves into raw_payload for forensics.
         let today_row = UsageRow::new_api(
             Provider::OpenRouter,
             Source::AdminApi,
@@ -108,7 +116,37 @@ impl OpenRouterClient {
         .with_model("openrouter (daily)")
         .with_cost_usd(parsed.usage_daily);
 
-        Ok(vec![today_row])
+        let mut rows = vec![today_row];
+
+        // Earlier-this-month spend: period = first-of-month -> today midnight,
+        // cost = usage_monthly - usage_daily. Disjoint from today's period.
+        // Skipped when today is day 1 (the row would have zero-length period
+        // and zero-or-negative cost).
+        let month_first = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)
+            .context("invalid month first")?;
+        if today > month_first {
+            let earlier_cost = parsed.usage_monthly - parsed.usage_daily;
+            if earlier_cost.is_finite() && earlier_cost >= 0.0 {
+                let earlier_row = UsageRow::new_api(
+                    Provider::OpenRouter,
+                    Source::AdminApi,
+                    day_start_utc(month_first),
+                    day_start_utc(today),
+                    raw.clone(),
+                )
+                .with_model("openrouter (earlier this month)")
+                .with_cost_usd(earlier_cost);
+                rows.push(earlier_row);
+            } else {
+                warn!(
+                    usage_daily = parsed.usage_daily,
+                    usage_monthly = parsed.usage_monthly,
+                    "openrouter usage_monthly < usage_daily; skipping earlier-month row"
+                );
+            }
+        }
+
+        Ok(rows)
     }
 }
 
@@ -172,7 +210,8 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
-    async fn parses_envelope_form() {
+    async fn parses_envelope_form_emits_two_disjoint_rows() {
+        // usage_monthly=20, usage_daily=5 → today=$5 + earlier=$15 = $20.
         let server = MockServer::start().await;
         let body = serde_json::json!({
             "data": {
@@ -195,11 +234,59 @@ mod tests {
 
         let client = OpenRouterClient::with_base_url("sk-or-FAKE", server.uri()).unwrap();
         let rows = client.fetch_usage().await.unwrap();
-        assert_eq!(rows.len(), 1);
-        let r = &rows[0];
-        assert_eq!(r.provider, Provider::OpenRouter);
-        assert!((r.cost_usd.unwrap() - 5.0).abs() < 1e-9);
-        assert_eq!(r.model.as_deref(), Some("openrouter (daily)"));
+        assert_eq!(rows.len(), 2, "today + earlier-this-month = 2 rows");
+        let today = rows
+            .iter()
+            .find(|r| r.model.as_deref() == Some("openrouter (daily)"))
+            .expect("today row");
+        let earlier = rows
+            .iter()
+            .find(|r| r.model.as_deref() == Some("openrouter (earlier this month)"))
+            .expect("earlier row");
+        assert!((today.cost_usd.unwrap() - 5.0).abs() < 1e-9);
+        assert!((earlier.cost_usd.unwrap() - 15.0).abs() < 1e-9);
+        // Disjoint periods: earlier ends where today starts.
+        assert_eq!(earlier.period_end, today.period_start);
+    }
+
+    #[tokio::test]
+    async fn month_total_visible_when_today_is_zero() {
+        // Regression test for the live OpenRouter poll on 2026-04-28:
+        // usage_daily=0.0, usage_monthly=250.019809425. Before the fix,
+        // only today's $0 row got stored and `lithium month` showed $0.
+        // After the fix, the earlier-this-month row carries the $250.
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "label": "lithium-prod",
+            "is_free_tier": false,
+            "usage": 250.019809425,
+            "usage_daily": 0.0,
+            "usage_weekly": 12.5,
+            "usage_monthly": 250.019809425
+        });
+        Mock::given(method("GET"))
+            .and(path("/api/v1/key"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+
+        let client = OpenRouterClient::with_base_url("sk-or-FAKE", server.uri()).unwrap();
+        let rows = client.fetch_usage().await.unwrap();
+        assert_eq!(rows.len(), 2, "even with usage_daily=0 we still emit both rows");
+        let today = rows
+            .iter()
+            .find(|r| r.model.as_deref() == Some("openrouter (daily)"))
+            .unwrap();
+        let earlier = rows
+            .iter()
+            .find(|r| r.model.as_deref() == Some("openrouter (earlier this month)"))
+            .unwrap();
+        assert!((today.cost_usd.unwrap() - 0.0).abs() < 1e-9);
+        assert!(
+            (earlier.cost_usd.unwrap() - 250.019809425).abs() < 1e-6,
+            "earlier-this-month should carry the $250: got {}",
+            earlier.cost_usd.unwrap()
+        );
     }
 
     #[tokio::test]
@@ -223,8 +310,13 @@ mod tests {
 
         let client = OpenRouterClient::with_base_url("sk-or-FAKE", server.uri()).unwrap();
         let rows = client.fetch_usage().await.unwrap();
-        assert_eq!(rows.len(), 1);
-        assert!((rows[0].cost_usd.unwrap() - 1.5).abs() < 1e-9);
+        // Flat form parses; today + earlier rows depending on day-of-month
+        // (we just verify the today row is present with usage_daily).
+        let today = rows
+            .iter()
+            .find(|r| r.model.as_deref() == Some("openrouter (daily)"))
+            .unwrap();
+        assert!((today.cost_usd.unwrap() - 1.5).abs() < 1e-9);
     }
 
     #[tokio::test]

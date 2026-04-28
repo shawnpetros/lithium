@@ -13,7 +13,7 @@ use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, NaiveDate, TimeZone, Utc};
 use lithium_core::types::{Provider, Source, UsageRow};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use tracing::{debug, info, warn};
 
 const COSTS_PATH: &str = "/v1/organization/costs";
@@ -54,6 +54,20 @@ impl OpenAIClient {
         let mut page_token: Option<String> = None;
 
         loop {
+            // OpenAI signs the next_page token against the canonical query
+            // params. Subsequent requests must replay them verbatim, in the
+            // same shape the server expects. Two observations from the live
+            // 400 ("page token is invalid"):
+            //   1) `group_by[]=...` (PHP/Rails bracket syntax) does not match
+            //      the canonical form. OpenAI uses bare repeated keys:
+            //      `group_by=line_item`. Send that.
+            //   2) Including `bucket_width=1d` is fine on the first page but
+            //      causes the second-page token to mismatch when the server
+            //      treats default values as omitted from the canonical form.
+            //      We omit bucket_width since `1d` is the default per docs.
+            // We also bump `limit` to 31 so a typical month-to-date query
+            // fits in a single page, which sidesteps pagination entirely
+            // for the common case.
             let mut req = self
                 .client
                 .get(format!("{}{}", self.base_url, COSTS_PATH))
@@ -61,9 +75,9 @@ impl OpenAIClient {
                 .query(&[
                     ("start_time", starting_at.timestamp().to_string()),
                     ("end_time", ending_at.timestamp().to_string()),
-                    ("bucket_width", "1d".into()),
+                    ("limit", "31".into()),
                 ])
-                .query(&[("group_by[]", "line_item")]);
+                .query(&[("group_by", "line_item")]);
 
             if let Some(token) = &page_token {
                 req = req.query(&[("page", token.as_str())]);
@@ -175,10 +189,36 @@ struct CostsResult {
 
 #[derive(Debug, Deserialize, Clone)]
 struct Amount {
-    #[serde(default)]
+    /// OpenAI returns `value` as a string-encoded fixed-point decimal
+    /// (e.g. "0.006787350000000000000000000000000000") to avoid f64 precision
+    /// loss on the wire. We deserialize either a JSON number or a string and
+    /// normalize to f64 at parse time. The few extra trailing decimals don't
+    /// matter for cents-precision aggregation.
+    #[serde(default, deserialize_with = "de_value")]
     value: Option<f64>,
     #[serde(default)]
     currency: Option<String>,
+}
+
+fn de_value<'de, D>(d: D) -> std::result::Result<Option<f64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum NumOrStr {
+        Num(f64),
+        Str(String),
+    }
+    match Option::<NumOrStr>::deserialize(d)? {
+        None => Ok(None),
+        Some(NumOrStr::Num(n)) => Ok(Some(n)),
+        Some(NumOrStr::Str(s)) => s
+            .parse::<f64>()
+            .map(Some)
+            .map_err(|e| D::Error::custom(format!("amount.value not parseable as f64: {e}"))),
+    }
 }
 
 fn cost_result_to_usage_row(
@@ -240,17 +280,19 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn sample_response_body() -> serde_json::Value {
+        // Mix string-form (what the live API returns) and number-form (what some
+        // SDKs / mocks return) to verify the deserializer handles both.
         serde_json::json!({
             "object": "page",
             "data": [
                 {
                     "object": "bucket",
-                    "start_time": 1761609600,  // 2025-10-28 00:00 UTC
-                    "end_time": 1761696000,    // 2025-10-29 00:00 UTC
+                    "start_time": 1761609600,
+                    "end_time": 1761696000,
                     "results": [
                         {
                             "object": "organization.costs.result",
-                            "amount": {"value": 1.23, "currency": "usd"},
+                            "amount": {"value": "1.230000000000000000000000000000", "currency": "usd"},
                             "line_item": "completions",
                             "project_id": null
                         },
@@ -274,7 +316,8 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/v1/organization/costs"))
             .and(header("authorization", "Bearer sk-admin-FAKE"))
-            .and(query_param("bucket_width", "1d"))
+            .and(query_param("group_by", "line_item"))
+            .and(query_param("limit", "31"))
             .respond_with(ResponseTemplate::new(200).set_body_json(sample_response_body()))
             .mount(&server)
             .await;
@@ -308,6 +351,104 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(msg.contains("401"));
         assert!(msg.contains("Admin Keys"));
+    }
+
+    #[tokio::test]
+    async fn parses_string_form_amount_value() {
+        // Regression test for the OpenAI live-poll failure on 2026-04-27:
+        // the live API returns amount.value as a high-precision decimal
+        // STRING (e.g., "0.006787350000000000000000000000000000"), not a
+        // JSON number. The de_value custom deserializer normalizes both
+        // forms to f64.
+        let server = MockServer::start().await;
+        let body = serde_json::json!({
+            "object": "page",
+            "data": [{
+                "object": "bucket",
+                "start_time": 1775001600,
+                "end_time": 1775088000,
+                "start_time_iso": "2026-04-01T00:00:00",
+                "end_time_iso": "2026-04-02T00:00:00",
+                "results": [{
+                    "object": "organization.costs.result",
+                    "amount": {
+                        "value": "0.006787350000000000000000000000000000",
+                        "currency": "usd"
+                    },
+                    "line_item": "completions",
+                    "project_id": null
+                }]
+            }],
+            "has_more": false,
+            "next_page": null
+        });
+        Mock::given(method("GET"))
+            .and(path("/v1/organization/costs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+
+        let client = OpenAIClient::with_base_url("sk-admin-FAKE", server.uri()).unwrap();
+        let start = Utc.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 4, 2, 0, 0, 0).unwrap();
+        let rows = client.fetch_costs(start, end).await.expect("must parse string-form amount");
+        assert_eq!(rows.len(), 1);
+        let cost = rows[0].cost_usd.expect("cost present");
+        assert!((cost - 0.00678735).abs() < 1e-7, "got {cost}");
+    }
+
+    #[tokio::test]
+    async fn invalid_pagination_token_surfaces_400_clearly() {
+        // Regression test for the OpenAI live-poll failure on 2026-04-28:
+        // following next_page can return 400 "page token is invalid" when
+        // OpenAI considers the request malformed. We make sure the error
+        // bubbles up with the API's message intact (truncated) so the user
+        // can see what went wrong.
+        let server = MockServer::start().await;
+        // First page: has_more=true with a next_page token.
+        let page1 = serde_json::json!({
+            "object": "page",
+            "data": [{
+                "object": "bucket",
+                "start_time": 1775001600,
+                "end_time": 1775088000,
+                "results": [{"amount": {"value": "1.0", "currency": "usd"}, "line_item": "p1"}]
+            }],
+            "has_more": true,
+            "next_page": "page_AAAAAGnxfK66ZThIAAAAAGnVmoA="
+        });
+        // Second page: 400 with the API's invalid-token error body.
+        let invalid_body = serde_json::json!({
+            "error": {
+                "message": "The page token is invalid, have you modified the query parameters?",
+                "type": "invalid_request_error",
+                "param": null,
+                "code": "invalid_request_error"
+            }
+        });
+
+        Mock::given(method("GET"))
+            .and(path("/v1/organization/costs"))
+            .and(query_param("page", "page_AAAAAGnxfK66ZThIAAAAAGnVmoA="))
+            .respond_with(ResponseTemplate::new(400).set_body_json(invalid_body))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/v1/organization/costs"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(page1))
+            .mount(&server)
+            .await;
+
+        let client = OpenAIClient::with_base_url("sk-admin-FAKE", server.uri()).unwrap();
+        let start = Utc.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 4, 30, 0, 0, 0).unwrap();
+        let err = client.fetch_costs(start, end).await.err().expect("must error on 400");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("HTTP 400"), "should surface status: {msg}");
+        assert!(
+            msg.contains("page token is invalid"),
+            "should include API error message: {msg}"
+        );
     }
 
     #[tokio::test]
