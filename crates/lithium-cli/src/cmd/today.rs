@@ -33,11 +33,20 @@ pub async fn run() -> Result<()> {
     }
 
     if rows.is_empty() {
-        let last = storage.last_poll(Provider::Anthropic, Source::AdminApi)?;
-        if last.is_none() {
-            println!("(no data yet — run `lithium poll` to populate)");
+        let last_admin = storage.last_poll(Provider::Anthropic, Source::AdminApi)?;
+        let last_local = storage.last_poll(Provider::Anthropic, Source::ClaudeCodeLocal)?;
+        if last_admin.is_none() && last_local.is_none() {
+            println!("(no data yet, run `lithium poll` to populate)");
             return Ok(());
         }
+        // We have polled before, but today's bucket is empty. Most common cause:
+        // the Anthropic Cost Report API has up to 24h reporting lag, so today's
+        // bucket isn't populated yet. Surface this explicitly so the user doesn't
+        // assume the tool is broken.
+        println!("(no rows for today yet)");
+        println!("The Anthropic Cost Report API typically has up to 24h reporting lag.");
+        println!("Try `lithium month` to see month-to-date, or repoll later in the day.");
+        println!();
     }
 
     let mut total_today = 0.0;

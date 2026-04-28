@@ -55,12 +55,23 @@ pub async fn run() -> Result<()> {
         );
     }
 
-    // 5. Connectivity to api.anthropic.com (only if a key is configured)
+    // 5. Connectivity to api.anthropic.com (only if a key is configured).
+    //
+    // Use a day-aligned 3-day window so the bucket_width=1d snap reliably
+    // returns at least one bucket. (Passing arbitrary timestamps causes the
+    // API to reject the range with "ending date must be after starting date"
+    // when no full-day bucket fits inside the window.)
     if let Some(key) = admin_key {
+        use chrono::TimeZone;
         let client = AdminApiClient::new(key)?;
         let now = chrono::Utc::now();
-        let yesterday = now - chrono::Duration::days(1);
-        match client.fetch_cost_report(yesterday, now).await {
+        let today = now.date_naive();
+        let three_days_ago = today - chrono::Duration::days(3);
+        let tomorrow = today + chrono::Duration::days(1);
+        let starting_at = chrono::Utc
+            .from_utc_datetime(&three_days_ago.and_hms_opt(0, 0, 0).unwrap());
+        let ending_at = chrono::Utc.from_utc_datetime(&tomorrow.and_hms_opt(0, 0, 0).unwrap());
+        match client.fetch_cost_report(starting_at, ending_at).await {
             Ok(_) => print_check(true, "Connectivity to api.anthropic.com", "200 OK"),
             Err(e) => print_check(false, "Connectivity to api.anthropic.com", &first_line(&format!("{e:#}"))),
         }
