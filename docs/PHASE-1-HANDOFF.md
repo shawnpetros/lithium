@@ -21,10 +21,13 @@ Phase 1 build session ended with the entire Anthropic-only CLI MVP working end-t
 
 ### Step 1: Generate an Anthropic admin API key
 
-1. Go to https://console.anthropic.com
-2. Settings -> Admin Keys -> Create Admin Key
-3. Name it `lithium-local`
-4. Copy the key (starts with `sk-ant-admin01-...`). **Don't paste it to Claude.** It goes in your local config file.
+> **Personal-account gotcha:** admin keys only appear in the console after you've created an organization. If you don't see "Admin Keys" in Settings, go through the "Create an organization" modal first. Personal accounts become 1-person orgs and you're automatically the owner. After that, https://platform.claude.com/settings/admin-keys becomes reachable.
+
+1. Go to https://console.anthropic.com (or https://platform.claude.com)
+2. If you don't already have an org: walk through the "Create an organization" flow. The Admin Keys page is gated behind org existence.
+3. Once an org is provisioned: https://platform.claude.com/settings/admin-keys → Create Admin Key
+4. Name it `lithium-local`
+5. Copy the key. It starts with `sk-ant-admin01-` (NOT `sk-ant-api03-`). **Don't paste it to Claude.** It goes in your local config file.
 
 ### Step 2: Drop the key into config
 
@@ -61,7 +64,9 @@ You should see something like:
 ✓ anthropic / claude_code_local  123 rows inserted (per-day per-model token volume)
 ```
 
-If you see `✗ anthropic / admin_api    error: 401 Unauthorized`, double-check the key is the **admin** key, not a regular API key. Admin keys start with `sk-ant-admin01-`.
+If you see `✗ anthropic / admin_api    error: 401 Unauthorized`, run `lithium doctor` — it prints the first 16 chars of the key under "Anthropic admin key set", which tells you the prefix:
+- `sk-ant-admin01-` → admin key (correct, but might be revoked or org-mismatched)
+- `sk-ant-api03-` → regular API key (wrong type — see Step 1 about org provisioning and the admin-keys page)
 
 ### Step 4: Verify the numbers
 

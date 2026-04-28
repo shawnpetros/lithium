@@ -67,8 +67,7 @@ Three things go wrong when you run agents across multiple providers:
 # 1. Install
 cargo install --git https://github.com/shawnpetros/lithium
 
-# 2. Generate an Anthropic admin key
-# console.anthropic.com -> Settings -> Admin Keys -> Create Admin Key
+# 2. Generate an Anthropic admin key (see "Getting an admin key" below — there's a gotcha for personal accounts)
 
 # 3. Initialize config
 lithium config
@@ -84,6 +83,22 @@ lithium poll
 # 6. Look at it
 lithium today
 ```
+
+### Getting an admin key (read this if you're on a personal account)
+
+Anthropic's Cost Report API requires an **admin key** (`sk-ant-admin01-...`), which is distinct from a regular API key (`sk-ant-api03-...`). On personal Anthropic console accounts, admin keys are not exposed by default — the "Admin Keys" section only appears after you've created an organization.
+
+If you don't see admin keys in your console:
+
+1. Go to https://platform.claude.com/settings (or console.anthropic.com → Settings)
+2. Find the "Create an organization" flow (organizations / workspace settings area)
+3. Walk through the org-creation modal. Personal accounts are 1-person orgs — you become the owner.
+4. After provisioning, navigate to https://platform.claude.com/settings/admin-keys
+5. Create an admin key, name it `lithium-local`, copy the value
+
+The key starts with `sk-ant-admin01-`. If yours starts with `sk-ant-api03-`, that's a regular API key and lithium will return `401 Unauthorized` from the Cost Report endpoint.
+
+Run `lithium doctor` after pasting the key — it will tell you exactly which kind you have, even with the redaction in place.
 
 Output looks like:
 
