@@ -6,6 +6,8 @@ use lithium_anthropic::{AdminApiClient, ClaudeCodeReader};
 use lithium_core::config::Config;
 use lithium_core::storage::Storage;
 use lithium_core::types::{Provider, Source};
+use lithium_openai::OpenAIClient;
+use lithium_openrouter::OpenRouterClient;
 use tracing::{error, info, warn};
 
 pub async fn run(provider_filter: Option<String>) -> Result<()> {
@@ -13,14 +15,20 @@ pub async fn run(provider_filter: Option<String>) -> Result<()> {
     let db_path = cfg.db_path()?;
     let storage = Storage::open(&db_path)?;
 
-    let want_anthropic = match &provider_filter {
-        Some(p) => p == "anthropic",
+    let want = |p: &str| match &provider_filter {
+        Some(filter) => filter == p,
         None => true,
     };
 
-    if want_anthropic {
+    if want("anthropic") {
         poll_anthropic_admin(&cfg, &storage).await;
         poll_claude_code_local(&cfg, &storage).await;
+    }
+    if want("openai") {
+        poll_openai_costs(&cfg, &storage).await;
+    }
+    if want("openrouter") {
+        poll_openrouter(&cfg, &storage).await;
     }
 
     if let Some(p) = &provider_filter {
@@ -165,6 +173,169 @@ async fn poll_claude_code_local(cfg: &Config, storage: &Storage) {
             let _ = storage.record_poll(
                 Provider::Anthropic,
                 Source::ClaudeCodeLocal,
+                started_at,
+                Utc::now(),
+                "error",
+                0,
+                Some(&format!("{e:#}")),
+            );
+        }
+    }
+}
+
+async fn poll_openai_costs(cfg: &Config, storage: &Storage) {
+    let started_at = Utc::now();
+    let admin_key = cfg
+        .providers
+        .openai
+        .as_ref()
+        .and_then(|o| o.admin_api_key.clone());
+
+    let Some(key) = admin_key else {
+        let msg = "openai admin_api_key not set in config";
+        info!(msg);
+        println!("- openai / admin_api       not configured (set admin_api_key in ~/.config/lithium/config.toml)");
+        let _ = storage.record_poll(
+            Provider::OpenAI,
+            Source::AdminApi,
+            started_at,
+            Utc::now(),
+            "skipped",
+            0,
+            Some(msg),
+        );
+        return;
+    };
+
+    info!("polling openai costs");
+    let client = match OpenAIClient::new(key) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("openai client init failed: {e:#}");
+            println!("✗ openai / admin_api       error: {}", first_line(&format!("{e:#}")));
+            let _ = storage.record_poll(
+                Provider::OpenAI,
+                Source::AdminApi,
+                started_at,
+                Utc::now(),
+                "error",
+                0,
+                Some(&format!("{e:#}")),
+            );
+            return;
+        }
+    };
+
+    match client.fetch_month_to_date(Utc::now()).await {
+        Ok(rows) => {
+            let mut written = 0u64;
+            for row in &rows {
+                if let Err(e) = storage.upsert_usage(row) {
+                    warn!("upsert failed: {e:#}");
+                } else {
+                    written += 1;
+                }
+            }
+            let _ = storage.record_poll(
+                Provider::OpenAI,
+                Source::AdminApi,
+                started_at,
+                Utc::now(),
+                "ok",
+                written,
+                None,
+            );
+            println!(
+                "✓ openai / admin_api             {written} rows inserted ({} line items)",
+                count_unique_models(&rows)
+            );
+        }
+        Err(e) => {
+            error!("openai costs fetch failed: {e:#}");
+            println!("✗ openai / admin_api       error: {}", first_line(&format!("{e:#}")));
+            let _ = storage.record_poll(
+                Provider::OpenAI,
+                Source::AdminApi,
+                started_at,
+                Utc::now(),
+                "error",
+                0,
+                Some(&format!("{e:#}")),
+            );
+        }
+    }
+}
+
+async fn poll_openrouter(cfg: &Config, storage: &Storage) {
+    let started_at = Utc::now();
+    let api_key = cfg
+        .providers
+        .openrouter
+        .as_ref()
+        .and_then(|o| o.api_key.clone());
+
+    let Some(key) = api_key else {
+        let msg = "openrouter api_key not set in config";
+        info!(msg);
+        println!("- openrouter / admin_api   not configured (set api_key in ~/.config/lithium/config.toml)");
+        let _ = storage.record_poll(
+            Provider::OpenRouter,
+            Source::AdminApi,
+            started_at,
+            Utc::now(),
+            "skipped",
+            0,
+            Some(msg),
+        );
+        return;
+    };
+
+    info!("polling openrouter");
+    let client = match OpenRouterClient::new(key) {
+        Ok(c) => c,
+        Err(e) => {
+            error!("openrouter client init failed: {e:#}");
+            println!("✗ openrouter / admin_api   error: {}", first_line(&format!("{e:#}")));
+            let _ = storage.record_poll(
+                Provider::OpenRouter,
+                Source::AdminApi,
+                started_at,
+                Utc::now(),
+                "error",
+                0,
+                Some(&format!("{e:#}")),
+            );
+            return;
+        }
+    };
+
+    match client.fetch_usage().await {
+        Ok(rows) => {
+            let mut written = 0u64;
+            for row in &rows {
+                if let Err(e) = storage.upsert_usage(row) {
+                    warn!("upsert failed: {e:#}");
+                } else {
+                    written += 1;
+                }
+            }
+            let _ = storage.record_poll(
+                Provider::OpenRouter,
+                Source::AdminApi,
+                started_at,
+                Utc::now(),
+                "ok",
+                written,
+                None,
+            );
+            println!("✓ openrouter / admin_api         {written} rows inserted (today's usage_daily)");
+        }
+        Err(e) => {
+            error!("openrouter fetch failed: {e:#}");
+            println!("✗ openrouter / admin_api   error: {}", first_line(&format!("{e:#}")));
+            let _ = storage.record_poll(
+                Provider::OpenRouter,
+                Source::AdminApi,
                 started_at,
                 Utc::now(),
                 "error",

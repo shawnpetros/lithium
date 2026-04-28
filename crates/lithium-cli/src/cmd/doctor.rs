@@ -4,6 +4,8 @@ use anyhow::Result;
 use lithium_anthropic::AdminApiClient;
 use lithium_core::config::Config;
 use lithium_core::storage::Storage;
+use lithium_openai::OpenAIClient;
+use lithium_openrouter::OpenRouterClient;
 
 pub async fn run() -> Result<()> {
     println!("lithium doctor");
@@ -77,6 +79,70 @@ pub async fn run() -> Result<()> {
         }
     } else {
         print_check(false, "Connectivity to api.anthropic.com", "skipped (no admin key set)");
+    }
+
+    // 6. OpenAI admin key + connectivity
+    let openai_key = cfg
+        .as_ref()
+        .and_then(|c| c.providers.openai.as_ref())
+        .and_then(|o| o.admin_api_key.clone());
+    print_check(
+        openai_key.is_some(),
+        "OpenAI admin key set",
+        openai_key
+            .as_deref()
+            .map(redact)
+            .unwrap_or_else(|| "not set".to_string())
+            .as_str(),
+    );
+    if let Some(key) = openai_key {
+        use chrono::TimeZone;
+        let client = OpenAIClient::new(key)?;
+        let now = chrono::Utc::now();
+        let today = now.date_naive();
+        let three_days_ago = today - chrono::Duration::days(3);
+        let tomorrow = today + chrono::Duration::days(1);
+        let starting_at = chrono::Utc
+            .from_utc_datetime(&three_days_ago.and_hms_opt(0, 0, 0).unwrap());
+        let ending_at = chrono::Utc.from_utc_datetime(&tomorrow.and_hms_opt(0, 0, 0).unwrap());
+        match client.fetch_costs(starting_at, ending_at).await {
+            Ok(_) => print_check(true, "Connectivity to api.openai.com", "200 OK"),
+            Err(e) => print_check(
+                false,
+                "Connectivity to api.openai.com",
+                &first_line(&format!("{e:#}")),
+            ),
+        }
+    } else {
+        print_check(false, "Connectivity to api.openai.com", "skipped (no admin key set)");
+    }
+
+    // 7. OpenRouter key + connectivity
+    let openrouter_key = cfg
+        .as_ref()
+        .and_then(|c| c.providers.openrouter.as_ref())
+        .and_then(|o| o.api_key.clone());
+    print_check(
+        openrouter_key.is_some(),
+        "OpenRouter API key set",
+        openrouter_key
+            .as_deref()
+            .map(redact)
+            .unwrap_or_else(|| "not set".to_string())
+            .as_str(),
+    );
+    if let Some(key) = openrouter_key {
+        let client = OpenRouterClient::new(key)?;
+        match client.fetch_usage().await {
+            Ok(_) => print_check(true, "Connectivity to openrouter.ai", "200 OK"),
+            Err(e) => print_check(
+                false,
+                "Connectivity to openrouter.ai",
+                &first_line(&format!("{e:#}")),
+            ),
+        }
+    } else {
+        print_check(false, "Connectivity to openrouter.ai", "skipped (no api key set)");
     }
 
     println!();

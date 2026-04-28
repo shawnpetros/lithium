@@ -23,6 +23,19 @@ pub async fn run() -> Result<()> {
     let anthropic_local_dir = cfg.claude_code_state_dir();
     let anthropic_local_configured = anthropic_local_dir.exists();
 
+    let openai_configured = cfg
+        .providers
+        .openai
+        .as_ref()
+        .and_then(|o| o.admin_api_key.as_ref())
+        .is_some();
+    let openrouter_configured = cfg
+        .providers
+        .openrouter
+        .as_ref()
+        .and_then(|o| o.api_key.as_ref())
+        .is_some();
+
     let entries: Vec<(Provider, Source, bool, &'static str, String)> = vec![
         (
             Provider::Anthropic,
@@ -41,16 +54,16 @@ pub async fn run() -> Result<()> {
         (
             Provider::OpenAI,
             Source::AdminApi,
-            false,
+            openai_configured,
             "phase 2",
-            "(not implemented)".into(),
+            "OpenAI Admin API (/v1/organization/costs)".into(),
         ),
         (
             Provider::OpenRouter,
             Source::AdminApi,
-            false,
+            openrouter_configured,
             "phase 2",
-            "(not implemented)".into(),
+            "OpenRouter (/api/v1/key, regular API key works)".into(),
         ),
     ];
 

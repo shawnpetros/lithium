@@ -1,0 +1,25 @@
+[package]
+name = "lithium-openrouter"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "lithium OpenRouter adapter: /api/v1/key polling for daily/weekly/monthly spend"
+
+[dependencies]
+lithium-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+tokio = { workspace = true, features = ["full", "test-util"] }

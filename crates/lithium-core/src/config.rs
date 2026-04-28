@@ -72,6 +72,8 @@ impl Default for PollConfig {
 #[serde(deny_unknown_fields)]
 pub struct ProvidersConfig {
     pub anthropic: Option<AnthropicConfig>,
+    pub openai: Option<OpenAIConfig>,
+    pub openrouter: Option<OpenRouterConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +83,22 @@ pub struct AnthropicConfig {
     pub admin_api_key: Option<String>,
     /// Override Claude Code state directory. Default: `~/.claude`.
     pub claude_code_state_dir: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenAIConfig {
+    /// Admin API key. Format: `sk-admin-...`. Required for Costs API polling.
+    /// Distinct from regular API keys (`sk-...`).
+    pub admin_api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpenRouterConfig {
+    /// Regular API key. The /api/v1/key endpoint accepts any OpenRouter API key
+    /// (no admin/management key required) and returns usage_daily/weekly/monthly.
+    pub api_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -195,12 +213,16 @@ default_cadence_minutes = 15
 # Optional. Default: ~/.claude
 # claude_code_state_dir = "~/.claude"
 
-# Phase 2 placeholders (not yet implemented):
+# OpenAI: requires an Admin API key (sk-admin-...) generated at
+# platform.openai.com -> Settings -> Organization -> Admin Keys.
+# Distinct from regular API keys (sk-...).
 # [providers.openai]
-# admin_api_key = "..."
-#
+# admin_api_key = "sk-admin-PASTE-HERE"
+
+# OpenRouter: a regular API key works (no admin/management key required).
+# Generate at openrouter.ai/keys.
 # [providers.openrouter]
-# api_key = "..."
+# api_key = "sk-or-PASTE-HERE"
 
 [fixed_costs]
 # Monthly flat-rate subscriptions to add into `lithium month` totals.

@@ -935,6 +935,8 @@ dependencies = [
  "clap",
  "lithium-anthropic",
  "lithium-core",
+ "lithium-openai",
+ "lithium-openrouter",
  "predicates",
  "serde_json",
  "tempfile",
@@ -957,6 +959,38 @@ dependencies = [
  "thiserror 1.0.69",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "lithium-openai"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "lithium-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
+name = "lithium-openrouter"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "lithium-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "wiremock",
 ]
 
 [[package]]

@@ -15,7 +15,7 @@ Output assets/demo.mp4
 Set FontFamily "Fira Code"
 Set FontSize 14
 Set Width 920
-Set Height 620
+Set Height 800
 Set Padding 18
 Set Theme "Catppuccin Mocha"
 Set TypingSpeed 45ms

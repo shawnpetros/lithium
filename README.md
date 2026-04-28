@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <strong>Status:</strong> Phase 1 build in progress. Spec at <a href="docs/SPEC-PHASE-1.md"><code>docs/SPEC-PHASE-1.md</code></a>. v0.1.0 ships when <code>lithium today</code> and <code>lithium month</code> return correct numbers from a fresh install. Watch / star to know when.
+  <strong>Status:</strong> v0.2.0. Anthropic + OpenAI + OpenRouter adapters all wired. Daemon split + <code>cship</code> status-line + SwiftBar menubar are Phase 3.
 </p>
 
 <p align="center">
@@ -47,7 +47,7 @@ Three things go wrong when you run agents across multiple providers:
 
 `lithium` makes it the daemon's problem.
 
-## Features (Phase 1)
+## Features
 
 | Feature | Description |
 |---|---|
@@ -56,8 +56,10 @@ Three things go wrong when you run agents across multiple providers:
 | **`lithium adapters`** | List configured providers + last-poll status |
 | **`lithium config`** | Edit `~/.config/lithium/config.toml` in `$EDITOR` |
 | **`lithium doctor`** | Verify config + connectivity + DB health |
-| **Anthropic Admin API** | Direct API spend per model (admin key required) |
-| **Claude Code session reader** | Session + weekly limit usage with reset timestamps |
+| **Anthropic** | Cost Report admin API + Claude Code local-state reader |
+| **OpenAI** | `/v1/organization/costs` admin API per-day USD by line item |
+| **OpenRouter** | `/api/v1/key` (regular API key works) for daily/weekly/monthly |
+| **Fixed costs** | Declare flat-rate subscriptions (Max, ChatGPT Pro) for true total |
 | **SQLite storage** | All data local at `~/.local/share/lithium/usage.db` |
 | **No telemetry** | Nothing leaves your machine. Period. |
 
@@ -67,38 +69,53 @@ Three things go wrong when you run agents across multiple providers:
 # 1. Install
 cargo install --git https://github.com/shawnpetros/lithium
 
-# 2. Generate an Anthropic admin key (see "Getting an admin key" below — there's a gotcha for personal accounts)
+# 2. Initialize config + storage
+lithium config       # opens ~/.config/lithium/config.toml in $EDITOR
+lithium init         # creates the SQLite database
 
-# 3. Initialize config
-lithium config
+# 3. Add at least one provider's key to the config (uncomment + paste):
+#    [providers.anthropic]   admin_api_key = "sk-ant-admin01-..."
+#    [providers.openai]      admin_api_key = "sk-admin-..."
+#    [providers.openrouter]  api_key       = "sk-or-..."
 
-# Edit the file, paste your admin key under [providers.anthropic]
-
-# 4. Initialize storage
-lithium init
-
-# 5. Pull today's data
+# 4. Pull data
 lithium poll
 
-# 6. Look at it
+# 5. Look at it
 lithium today
+lithium month
 ```
 
-### Getting an admin key (read this if you're on a personal account)
+Each provider is independent — wire only the ones you use. See the per-provider notes below for where to generate each key.
 
-Anthropic's Cost Report API requires an **admin key** (`sk-ant-admin01-...`), which is distinct from a regular API key (`sk-ant-api03-...`). On personal Anthropic console accounts, admin keys are not exposed by default — the "Admin Keys" section only appears after you've created an organization.
+### Getting keys
 
-If you don't see admin keys in your console:
+#### Anthropic (admin key required)
 
-1. Go to https://platform.claude.com/settings (or console.anthropic.com → Settings)
-2. Find the "Create an organization" flow (organizations / workspace settings area)
-3. Walk through the org-creation modal. Personal accounts are 1-person orgs — you become the owner.
-4. After provisioning, navigate to https://platform.claude.com/settings/admin-keys
-5. Create an admin key, name it `lithium-local`, copy the value
+The Cost Report API requires an **admin key** (`sk-ant-admin01-...`), distinct from a regular API key (`sk-ant-api03-...`). On personal accounts, admin keys are gated behind organization existence:
 
-The key starts with `sk-ant-admin01-`. If yours starts with `sk-ant-api03-`, that's a regular API key and lithium will return `401 Unauthorized` from the Cost Report endpoint.
+1. Go to https://platform.claude.com/settings
+2. If you don't have an org: walk through "Create an organization" first. Personal accounts become 1-person orgs (you're the owner).
+3. https://platform.claude.com/settings/admin-keys → Create Admin Key, name it `lithium-local`
+4. Paste under `[providers.anthropic] admin_api_key`
 
-Run `lithium doctor` after pasting the key — it will tell you exactly which kind you have, even with the redaction in place.
+`lithium doctor` prints the key prefix so you can verify the type at a glance.
+
+#### OpenAI (admin key required)
+
+`/v1/organization/costs` also requires an admin key (`sk-admin-...`):
+
+1. https://platform.openai.com/settings/organization/admin-keys
+2. Create admin key → paste under `[providers.openai] admin_api_key`
+
+#### OpenRouter (regular key works)
+
+`/api/v1/key` accepts any OpenRouter API key — no admin / management key dance:
+
+1. https://openrouter.ai/keys → create or copy an existing key
+2. Paste under `[providers.openrouter] api_key`
+
+Bonus: OpenRouter pre-aggregates `usage_daily` / `usage_weekly` / `usage_monthly`, so polling once gives you all three at once.
 
 Output looks like:
 
@@ -140,12 +157,12 @@ Phase 1 ships only the CLI. Each subsequent phase adds one surface, polished to 
 
 | Phase | Scope | Status |
 |---|---|---|
-| **P1** | Anthropic adapter + CLI surface | In progress |
-| **P2** | OpenAI + OpenRouter adapters | Not started |
+| **P1** | Anthropic adapter + CLI surface | ✅ v0.1.0 |
+| **P2** | OpenAI + OpenRouter adapters | ✅ v0.2.0 |
 | **P3** | Daemon split + `cship` segment + SwiftBar menubar | Not started |
 | **P4** | OpenClaw MCP hooks (cost gates) + optional web dashboard | Not started |
 
-The discipline: each phase ships at finished quality before the next one starts. No half-built surface in `main`.
+The discipline: each phase ships at finished quality before the next one starts. No half-built surface in `main`. See [docs/ADAPTER-CONTRACT.md](docs/ADAPTER-CONTRACT.md) if you want to contribute another provider.
 
 ## Privacy
 

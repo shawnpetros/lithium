@@ -3,6 +3,8 @@ resolver = "2"
 members = [
     "crates/lithium-core",
     "crates/lithium-anthropic",
+    "crates/lithium-openai",
+    "crates/lithium-openrouter",
     "crates/lithium-cli",
 ]
 
@@ -56,6 +58,8 @@ tempfile = "3.14"
 # internal
 lithium-core = { path = "crates/lithium-core" }
 lithium-anthropic = { path = "crates/lithium-anthropic" }
+lithium-openai = { path = "crates/lithium-openai" }
+lithium-openrouter = { path = "crates/lithium-openrouter" }
 
 [profile.release]
 lto = "thin"

@@ -16,6 +16,8 @@ path = "src/main.rs"
 [dependencies]
 lithium-core.workspace = true
 lithium-anthropic.workspace = true
+lithium-openai.workspace = true
+lithium-openrouter.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
 clap.workspace = true

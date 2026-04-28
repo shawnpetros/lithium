@@ -121,10 +121,17 @@ fn day_end(d: NaiveDate) -> chrono::DateTime<chrono::Utc> {
 }
 
 fn capitalize(s: &str) -> String {
-    let mut c = s.chars();
-    match c.next() {
-        Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
-        None => String::new(),
+    match s {
+        "anthropic" => "Anthropic".to_string(),
+        "openai" => "OpenAI".to_string(),
+        "openrouter" => "OpenRouter".to_string(),
+        other => {
+            let mut c = other.chars();
+            match c.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        }
     }
 }
 
